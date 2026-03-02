@@ -1,0 +1,18 @@
+.DS_Store
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+
+# Training outputs and checkpoints
+out_*/
+*.pt
+training_metrics.npz
+reward_curve.png
+loss_curves.png
+
+# Logs
+slurm-*.out
+slurm-*.err
+
+# Large local datasets
+*.mat
