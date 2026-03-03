@@ -144,10 +144,11 @@ def main():
     entropy_round = []
     avg_reward_unscaled_round = []
 
-    # Timestamped output directory: out_DD-HH-MM-SS
+    # Timestamped output directory under main out/: out/DD-HH-MM-SS
     start_dt = datetime.now()
     run_tag = start_dt.strftime("%d-%H-%M-%S")
-    run_dir = f"out_{run_tag}"
+    out_root = "out"
+    run_dir = os.path.join(out_root, run_tag)
     os.makedirs(run_dir, exist_ok=True)
     print("run_dir:", run_dir)
 
@@ -290,16 +291,18 @@ def main():
 
         print("Current avg reward:", avg_reward)
 
-        # Save checkpoint
-        ckpt_path = os.path.join(run_dir, f"model_round{r}.pt")
-        torch.save({
-            "model": model.state_dict(),
-            "optimizer": optimizer.state_dict(),
-            "round": r,
-            "avg_reward": avg_reward,
-            "run_config": run_config,
-        }, ckpt_path)
-        print("Saved:", ckpt_path)
+        # Save checkpoint every 10 rounds and always on final round.
+        should_save_ckpt = ((r + 1) % 10 == 0) or (r == rounds - 1)
+        if should_save_ckpt:
+            ckpt_path = os.path.join(run_dir, f"model_round{r}.pt")
+            torch.save({
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "round": r,
+                "avg_reward": avg_reward,
+                "run_config": run_config,
+            }, ckpt_path)
+            print("Saved:", ckpt_path)
 
     # -----------------------
     # Save training metrics + plots

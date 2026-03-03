@@ -5,6 +5,7 @@ __pycache__/
 
 # Training outputs and checkpoints
 out_*/
+out/
 *.pt
 training_metrics.npz
 reward_curve.png
