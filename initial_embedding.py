@@ -151,7 +151,7 @@ def initial_embedding_single(
     face2tet: torch.Tensor,    # (F,2) long, -1 indicates boundary
     edges: torch.Tensor,       # (2,E) long (sorted)
     *,
-    tet_quality: Optional[torch.Tensor] = None,  # (K,) optional, current per-tet quality
+    tet_quality: Optional[Any] = None,  # (K,) optional, current per-tet quality
     step_frac: float = 0.0,      # progress feature for actor/critic
     no_improve_frac: float = 0.0, # progress feature for actor/critic
     num_fourier_freqs: int = 6,
@@ -234,7 +234,7 @@ def initial_embedding_single(
     #   - edge_face_inc
     #   - incidence graph src/dst
     # -------------------------
-    edge_face_inc = torch.zeros((E,), device=device, dtype=torch.long)
+    edge_face_inc_np = np.zeros((E,), dtype=np.int64)
     src: List[int] = []
     dst: List[int] = []
     for f in range(F):
@@ -246,7 +246,7 @@ def initial_embedding_single(
             e_idx = edge_map.get((u, v), None)
             if e_idx is None:
                 continue
-            edge_face_inc[e_idx] += 1
+            edge_face_inc_np[e_idx] += 1
             # edge -> face
             src.append(e_idx)
             dst.append(face_node)
@@ -257,6 +257,7 @@ def initial_embedding_single(
     if inc_bins is None:
         inc_bins = torch.tensor([0, 1, 2, 3, 4, 6, 8, 12, 20], device=device, dtype=torch.long)
 
+    edge_face_inc = torch.as_tensor(edge_face_inc_np, device=device, dtype=torch.long)
     edge_face_inc_oh = _bucketize_onehot(edge_face_inc, inc_bins)
 
     # -------------------------
@@ -264,26 +265,28 @@ def initial_embedding_single(
     # -------------------------
     K = int(tets.shape[0])
     if tet_quality is None:
-        q_t = torch.zeros((K,), device=device, dtype=torch.float32)
+        q_np = np.zeros((K,), dtype=np.float32)
     else:
-        q_t = tet_quality.to(device=device, dtype=torch.float32).reshape(-1)
-        if q_t.numel() < K:
-            q_pad = torch.zeros((K,), device=device, dtype=torch.float32)
-            q_pad[: q_t.numel()] = q_t
-            q_t = q_pad
-        elif q_t.numel() > K:
-            q_t = q_t[:K]
+        if isinstance(tet_quality, torch.Tensor):
+            q_np = tet_quality.detach().cpu().numpy().astype(np.float32, copy=False).reshape(-1)
+        else:
+            q_np = np.asarray(tet_quality, dtype=np.float32).reshape(-1)
+        if q_np.size < K:
+            q_pad = np.zeros((K,), dtype=np.float32)
+            q_pad[: q_np.size] = q_np
+            q_np = q_pad
+        elif q_np.size > K:
+            q_np = q_np[:K]
 
     # Edge-local quality stats over incident tets.
-    edge_tet_inc = torch.zeros((E,), device=device, dtype=torch.long)
-    edge_q_count = torch.zeros((E,), device=device, dtype=torch.float32)
-    edge_q_sum = torch.zeros((E,), device=device, dtype=torch.float32)
-    edge_q_sumsq = torch.zeros((E,), device=device, dtype=torch.float32)
-    edge_q_min = torch.full((E,), float("inf"), device=device, dtype=torch.float32)
-    edge_q_max = torch.full((E,), float("-inf"), device=device, dtype=torch.float32)
+    edge_tet_inc_np = np.zeros((E,), dtype=np.int64)
+    edge_q_count_np = np.zeros((E,), dtype=np.float32)
+    edge_q_sum_np = np.zeros((E,), dtype=np.float32)
+    edge_q_sumsq_np = np.zeros((E,), dtype=np.float32)
+    edge_q_min_np = np.full((E,), np.inf, dtype=np.float32)
+    edge_q_max_np = np.full((E,), -np.inf, dtype=np.float32)
 
     if K > 0:
-        q_np = q_t.detach().cpu().numpy()
         for kk in range(K):
             qk = float(q_np[kk])
             i, j, k2, l = map(int, tets_np[kk])
@@ -294,16 +297,22 @@ def initial_embedding_single(
                 idx = edge_map.get((u, v), None)
                 if idx is None:
                     continue
-                edge_tet_inc[idx] += 1
-                edge_q_count[idx] += 1.0
-                edge_q_sum[idx] += qk
-                edge_q_sumsq[idx] += qk * qk
-                if qk < float(edge_q_min[idx]):
-                    edge_q_min[idx] = qk
-                if qk > float(edge_q_max[idx]):
-                    edge_q_max[idx] = qk
+                edge_tet_inc_np[idx] += 1
+                edge_q_count_np[idx] += 1.0
+                edge_q_sum_np[idx] += qk
+                edge_q_sumsq_np[idx] += qk * qk
+                if qk < edge_q_min_np[idx]:
+                    edge_q_min_np[idx] = qk
+                if qk > edge_q_max_np[idx]:
+                    edge_q_max_np[idx] = qk
 
+    edge_tet_inc = torch.as_tensor(edge_tet_inc_np, device=device, dtype=torch.long)
     edge_tet_inc_oh = _bucketize_onehot(edge_tet_inc, inc_bins)
+    edge_q_count = torch.as_tensor(edge_q_count_np, device=device, dtype=torch.float32)
+    edge_q_sum = torch.as_tensor(edge_q_sum_np, device=device, dtype=torch.float32)
+    edge_q_sumsq = torch.as_tensor(edge_q_sumsq_np, device=device, dtype=torch.float32)
+    edge_q_min = torch.as_tensor(edge_q_min_np, device=device, dtype=torch.float32)
+    edge_q_max = torch.as_tensor(edge_q_max_np, device=device, dtype=torch.float32)
 
     edge_den = edge_q_count.clamp_min(1.0)
     edge_q_mean = edge_q_sum / edge_den
@@ -316,11 +325,11 @@ def initial_embedding_single(
     edge_q_feat = torch.stack([edge_q_mean, edge_q_min, edge_q_max, edge_q_std, edge_q_span], dim=-1)
 
     # Face-local quality stats over up-to-2 incident tets.
-    face_q_mean = torch.zeros((F,), device=device, dtype=torch.float32)
-    face_q_min = torch.zeros((F,), device=device, dtype=torch.float32)
-    face_q_max = torch.zeros((F,), device=device, dtype=torch.float32)
-    face_q_std = torch.zeros((F,), device=device, dtype=torch.float32)
-    face_q_span = torch.zeros((F,), device=device, dtype=torch.float32)
+    face_q_mean_np = np.zeros((F,), dtype=np.float32)
+    face_q_min_np = np.zeros((F,), dtype=np.float32)
+    face_q_max_np = np.zeros((F,), dtype=np.float32)
+    face_q_std_np = np.zeros((F,), dtype=np.float32)
+    face_q_span_np = np.zeros((F,), dtype=np.float32)
 
     if F > 0 and K > 0:
         f2_np = face2tet.detach().cpu().numpy()
@@ -333,19 +342,19 @@ def initial_embedding_single(
                 continue
             if has0 and not has1:
                 q0 = float(q_np[t0])
-                face_q_mean[f] = q0
-                face_q_min[f] = q0
-                face_q_max[f] = q0
-                face_q_std[f] = 0.0
-                face_q_span[f] = 0.0
+                face_q_mean_np[f] = q0
+                face_q_min_np[f] = q0
+                face_q_max_np[f] = q0
+                face_q_std_np[f] = 0.0
+                face_q_span_np[f] = 0.0
                 continue
             if has1 and not has0:
                 q1 = float(q_np[t1])
-                face_q_mean[f] = q1
-                face_q_min[f] = q1
-                face_q_max[f] = q1
-                face_q_std[f] = 0.0
-                face_q_span[f] = 0.0
+                face_q_mean_np[f] = q1
+                face_q_min_np[f] = q1
+                face_q_max_np[f] = q1
+                face_q_std_np[f] = 0.0
+                face_q_span_np[f] = 0.0
                 continue
             q0 = float(q_np[t0])
             q1 = float(q_np[t1])
@@ -353,12 +362,17 @@ def initial_embedding_single(
             q_min = q0 if q0 < q1 else q1
             q_max = q1 if q1 > q0 else q0
             q_std = 0.5 * abs(q0 - q1)  # population std for two samples
-            face_q_mean[f] = q_mean
-            face_q_min[f] = q_min
-            face_q_max[f] = q_max
-            face_q_std[f] = q_std
-            face_q_span[f] = q_max - q_min
+            face_q_mean_np[f] = q_mean
+            face_q_min_np[f] = q_min
+            face_q_max_np[f] = q_max
+            face_q_std_np[f] = q_std
+            face_q_span_np[f] = q_max - q_min
 
+    face_q_mean = torch.as_tensor(face_q_mean_np, device=device, dtype=torch.float32)
+    face_q_min = torch.as_tensor(face_q_min_np, device=device, dtype=torch.float32)
+    face_q_max = torch.as_tensor(face_q_max_np, device=device, dtype=torch.float32)
+    face_q_std = torch.as_tensor(face_q_std_np, device=device, dtype=torch.float32)
+    face_q_span = torch.as_tensor(face_q_span_np, device=device, dtype=torch.float32)
     face_q_feat = torch.stack([face_q_mean, face_q_min, face_q_max, face_q_std, face_q_span], dim=-1)
 
     # Global episode progress as actor input (repeated per node).
@@ -537,7 +551,7 @@ def batch_from_obs(
             F,
             F2,
             E,
-            tet_quality=torch.as_tensor(o["tet_quality"], device=device, dtype=torch.float32),
+            tet_quality=o["tet_quality"],
             step_frac=float(o.get("step_frac", 0.0)),
             no_improve_frac=float(o.get("no_improve_frac", 0.0)),
             num_fourier_freqs=num_fourier_freqs,

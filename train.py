@@ -93,12 +93,14 @@ def main():
     use_tqdm_update = False
     profile_timing_update = True
     enable_torch_compile = False
+    force_cpu_rollout = True
+    cpu_embed_for_gpu_rollout = True
 
     # model size defaults
-    d_h = 128
+    d_h = 96
     num_layers = 4
-    msg_hidden = 128
-    value_hidden = 128
+    msg_hidden = 96
+    value_hidden = 96
     dropout = 0
 
     # Env termination behavior
@@ -109,14 +111,16 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("device:", device)
     if device.type == "cuda":
-        # A40 profile with CPU-heavy rollout:
-        # keep minibatch conservative to avoid OOM with variable graph sizes.
-        K_epochs = 10
+        # A40 profile:
+        # run rollout forward on GPU, while keeping feature build on CPU.
+        K_epochs = 12
         minibatch_size = 128
         lr = 2e-4
         lr_final = 0.1 * lr
         c_ent = 0.004
         c_ent_final = 0.0012
+        force_cpu_rollout = False
+        cpu_embed_for_gpu_rollout = True
     else:
         # CPU fast profile: much lower per-minibatch compute.
         K_epochs = 4
@@ -137,6 +141,13 @@ def main():
         torch.set_num_threads(n_threads)
         torch.set_num_interop_threads(1)
         print(f"cpu threads: intra={torch.get_num_threads()} interop=1")
+        force_cpu_rollout = True
+        cpu_embed_for_gpu_rollout = False
+
+    print(
+        f"rollout mode: force_cpu_rollout={force_cpu_rollout} "
+        f"cpu_embed_for_gpu_rollout={cpu_embed_for_gpu_rollout}"
+    )
 
     # -----------------------
     # Dataset + Env
@@ -231,6 +242,8 @@ def main():
         "use_tqdm_update": use_tqdm_update,
         "profile_timing_update": profile_timing_update,
         "enable_torch_compile": enable_torch_compile,
+        "force_cpu_rollout": force_cpu_rollout,
+        "cpu_embed_for_gpu_rollout": cpu_embed_for_gpu_rollout,
         "d_h": d_h,
         "num_layers": num_layers,
         "msg_hidden": msg_hidden,
@@ -294,7 +307,8 @@ def main():
             model_action_to_env_with_sizes=model_action_to_env_with_sizes,
             device=device,
             display_every=50,
-            force_cpu_rollout=True,
+            force_cpu_rollout=force_cpu_rollout,
+            cpu_embed_for_gpu_rollout=cpu_embed_for_gpu_rollout,
         )
         avg_reward_list.append(avg_reward)
         avg_reward_unscaled_round.append(float(avg_reward) / float(reward_scale))

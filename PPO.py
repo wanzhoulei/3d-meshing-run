@@ -39,6 +39,24 @@ def _pad_lastdim(t: torch.Tensor, target: int, dim: int) -> torch.Tensor:
     return out
 
 
+def _bg_to_device(bg, device: torch.device):
+    """Move a BatchedGraph-like object to a target device."""
+    return bg.__class__(
+        x=bg.x.to(device),
+        edge_feat=bg.edge_feat.to(device),
+        face_feat=bg.face_feat.to(device),
+        quality_feat=bg.quality_feat.to(device),
+        edge_index=bg.edge_index.to(device),
+        node_mask=bg.node_mask.to(device),
+        edge_mask=bg.edge_mask.to(device),
+        edge_node_mask=bg.edge_node_mask.to(device),
+        face_node_mask=bg.face_node_mask.to(device),
+        edge_action_mask=bg.edge_action_mask.to(device),
+        face_action_mask=bg.face_action_mask.to(device),
+        aux=bg.aux,
+    )
+
+
 def compute_gae_from_buffers(buffers, gamma=0.99, gae_lambda=0.95):
     """
     Same GAE logic as your 2D PPO.py.
@@ -104,7 +122,8 @@ def PolicyRollout(
     model_action_to_env_with_sizes,
     device: torch.device,
     display_every: int = 20,
-    force_cpu_rollout: bool = True #whether to force rollout to be on cpu entirely
+    force_cpu_rollout: bool = True, #whether to force rollout to be on cpu entirely
+    cpu_embed_for_gpu_rollout: bool = True,
 ):
     """
     Run a rollout of length T across vectorized envs using current policy.
@@ -124,6 +143,10 @@ def PolicyRollout(
     # Choose rollout device/model
     # -------------------------
     rollout_device = torch.device("cpu") if force_cpu_rollout else device
+    if rollout_device.type == "cuda" and cpu_embed_for_gpu_rollout:
+        embed_device = torch.device("cpu")
+    else:
+        embed_device = rollout_device
 
     # Detect where the model currently lives (best-effort)
     try:
@@ -154,8 +177,17 @@ def PolicyRollout(
     dones_list = []
 
     for t in tqdm(range(T)):
-        bg = batch_from_obs(obs, device=rollout_device)  # BatchedGraph on rollout device
-        step_graphs.append(bg)
+        # Build features on embed_device, store rollout buffers on CPU.
+        bg_build = batch_from_obs(obs, device=embed_device)
+        if bg_build.x.device.type == "cpu":
+            bg_store = bg_build
+        else:
+            bg_store = _bg_to_device(bg_build, torch.device("cpu"))
+        step_graphs.append(bg_store)
+        if bg_build.x.device == rollout_device:
+            bg_model = bg_build
+        else:
+            bg_model = _bg_to_device(bg_build, rollout_device)
 
         # Determine per-env true sizes for action index mapping (ENV ordering uses [faces, edges])
         E_sizes = np.array([o["edges"].shape[1] for o in obs], dtype=np.int64)
@@ -163,30 +195,30 @@ def PolicyRollout(
 
         with torch.no_grad():
             # Guard against accidental mixed-device tensors in rollout.
-            if bg.x.device != rollout_device:
+            if bg_model.x.device != rollout_device:
                 raise RuntimeError(
-                    f"Rollout batch is on {bg.x.device}, expected {rollout_device}."
+                    f"Rollout batch is on {bg_model.x.device}, expected {rollout_device}."
                 )
 
             policy_out, value, _, _ = rollout_model(
-                x=bg.x,
-                edge_feat=bg.edge_feat,
-                face_feat=bg.face_feat,
-                critic_global_feat=bg.quality_feat,
-                edge_index=bg.edge_index,
-                node_mask=bg.node_mask,
-                edge_mask=bg.edge_mask,
-                edge_node_mask=bg.edge_node_mask,
-                face_node_mask=bg.face_node_mask,
-                edge_action_mask=bg.edge_action_mask,
-                face_action_mask=bg.face_action_mask,
+                x=bg_model.x,
+                edge_feat=bg_model.edge_feat,
+                face_feat=bg_model.face_feat,
+                critic_global_feat=bg_model.quality_feat,
+                edge_index=bg_model.edge_index,
+                node_mask=bg_model.node_mask,
+                edge_mask=bg_model.edge_mask,
+                edge_node_mask=bg_model.edge_node_mask,
+                face_node_mask=bg_model.face_node_mask,
+                edge_action_mask=bg_model.edge_action_mask,
+                face_action_mask=bg_model.face_action_mask,
             )
 
             logits = policy_out.logits  # (B, Emax+Fmax) in MODEL ordering [edges, faces]
 
             # If an env has no valid actions (all mask false), logits may be all -inf.
             # We handle by forcing action=0, logp=0, value=0 for those envs.
-            valid_any = (bg.edge_action_mask.any(dim=1) | bg.face_action_mask.any(dim=1))  # (B,)
+            valid_any = (bg_model.edge_action_mask.any(dim=1) | bg_model.face_action_mask.any(dim=1))  # (B,)
 
             # sample
             dist = torch.distributions.Categorical(logits=logits)
@@ -219,7 +251,9 @@ def PolicyRollout(
 
     # Bootstrap value from the state after the final env.step().
     with torch.no_grad():
-        bg_last = batch_from_obs(obs, device=rollout_device)
+        bg_last = batch_from_obs(obs, device=embed_device)
+        if bg_last.x.device != rollout_device:
+            bg_last = _bg_to_device(bg_last, rollout_device)
         _, last_value, _, _ = rollout_model(
             x=bg_last.x,
             edge_feat=bg_last.edge_feat,
