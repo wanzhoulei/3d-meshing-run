@@ -258,7 +258,6 @@ def initial_embedding_single(
         inc_bins = torch.tensor([0, 1, 2, 3, 4, 6, 8, 12, 20], device=device, dtype=torch.long)
 
     edge_face_inc_oh = _bucketize_onehot(edge_face_inc, inc_bins)
-    edge_tet_inc_oh  = _bucketize_onehot(edge_tet_inc,  inc_bins)
 
     # -------------------------
     # Local tet-quality features for actor (edge/face neighborhoods)
@@ -303,6 +302,8 @@ def initial_embedding_single(
                     edge_q_min[idx] = qk
                 if qk > float(edge_q_max[idx]):
                     edge_q_max[idx] = qk
+
+    edge_tet_inc_oh = _bucketize_onehot(edge_tet_inc, inc_bins)
 
     edge_den = edge_q_count.clamp_min(1.0)
     edge_q_mean = edge_q_sum / edge_den
