@@ -57,6 +57,18 @@ def _bg_to_device(bg, device: torch.device):
     )
 
 
+def _device_matches(actual: torch.device, expected: torch.device) -> bool:
+    """Robust device match (treat 'cuda' and 'cuda:0' as equivalent)."""
+    if actual.type != expected.type:
+        return False
+    if actual.type != "cuda":
+        return True
+    # If either side omits explicit index, accept the match.
+    if actual.index is None or expected.index is None:
+        return True
+    return actual.index == expected.index
+
+
 def compute_gae_from_buffers(buffers, gamma=0.99, gae_lambda=0.95):
     """
     Same GAE logic as your 2D PPO.py.
@@ -195,7 +207,7 @@ def PolicyRollout(
 
         with torch.no_grad():
             # Guard against accidental mixed-device tensors in rollout.
-            if bg_model.x.device != rollout_device:
+            if not _device_matches(bg_model.x.device, rollout_device):
                 raise RuntimeError(
                     f"Rollout batch is on {bg_model.x.device}, expected {rollout_device}."
                 )
