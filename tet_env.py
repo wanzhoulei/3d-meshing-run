@@ -118,7 +118,12 @@ class TetMeshRefineVecEnv:
         else:
             raise ValueError(f"Unknown score_mode={self.score_mode}")
 
-    def _obs(self, topo: TetMeshTopology, env_idx: Optional[int] = None) -> Dict[str, Any]:
+    def _obs(
+        self,
+        topo: TetMeshTopology,
+        env_idx: Optional[int] = None,
+        candidate_mask: Optional[np.ndarray] = None,
+    ) -> Dict[str, Any]:
         """
         Returns the observation of one particular topology
         """
@@ -127,13 +132,15 @@ class TetMeshRefineVecEnv:
         if env_idx is not None:
             step_frac = float(self.steps[env_idx]) / float(max(1, self.max_steps_per_episode))
             no_improve_frac = float(self.no_improve[env_idx]) / float(max(1, self.patience))
+        if candidate_mask is None:
+            candidate_mask = topo.candidate_mask()
         return dict(
             points=topo.points,  #shape (N, 3)
             tets=topo.tets, #shape (K, 4)
             faces=topo.faces,#shape (F, 3)
             face2tet=topo.face2tet, #shape shape (F, 2)
             edges=topo.edges, # shape (2, E)
-            candidate_mask=topo.candidate_mask(), # shape (F+E,)
+            candidate_mask=candidate_mask, # shape (F+E,)
             tet_quality=topo.tet_quality, # shape (K,)
             step_frac=step_frac,
             no_improve_frac=no_improve_frac,
@@ -187,6 +194,7 @@ class TetMeshRefineVecEnv:
         rewards = np.zeros((self.num_envs,), dtype=np.float64)
         dones = np.zeros((self.num_envs,), dtype=bool)
         infos: List[Dict[str, Any]] = []
+        obs: List[Dict[str, Any]] = []
 
         for b in range(self.num_envs):
             topo = self.topos[b]
@@ -196,13 +204,14 @@ class TetMeshRefineVecEnv:
             valid = topo.apply_action(a)
             if not valid:
                 rewards[b] = -self.invalid_penalty
+                score_now = score_before
             else:
                 score_after = self._score(topo)
                 rewards[b] = (score_after - score_before) * self.reward_scale
+                score_now = score_after
 
             # update termination bookkeeping
             self.steps[b] += 1
-            score_now = self._score(topo)
 
             improved = (score_now - self.best_score[b]) >= self.eps_improve
             if improved:
@@ -212,7 +221,8 @@ class TetMeshRefineVecEnv:
                 self.no_improve[b] += 1
 
             # done conditions
-            no_moves = not bool(np.any(topo.candidate_mask()))
+            candidate_mask = topo.candidate_mask()
+            no_moves = not bool(np.any(candidate_mask))
             too_long = self.steps[b] >= self.max_steps_per_episode
             stalled = self.no_improve[b] >= self.patience
             done = no_moves or too_long or stalled
@@ -240,6 +250,9 @@ class TetMeshRefineVecEnv:
                 sc = self._score(self.topos[b])
                 self.best_score[b] = sc
                 self.no_improve[b] = 0
+                obs.append(self._obs(self.topos[b], b))
+            else:
+                # Reuse candidate_mask already computed above.
+                obs.append(self._obs(topo, b, candidate_mask=candidate_mask))
 
-        obs = [self._obs(self.topos[b], b) for b in range(self.num_envs)]
         return StepResult(obs=obs, reward=rewards, done=dones, info=infos)
