@@ -16,6 +16,58 @@ from initial_embedding import batch_from_obs, model_action_to_env_with_sizes
 from PPO import PolicyRollout, compute_gae_from_buffers, PPO_update
 
 
+def save_training_artifacts(
+    run_dir,
+    avg_reward_list,
+    avg_reward_unscaled_round,
+    total_loss_round,
+    actor_loss_round,
+    value_loss_round,
+    entropy_round,
+):
+    metrics_npz_path = os.path.join(run_dir, "training_metrics.npz")
+    np.savez(
+        metrics_npz_path,
+        avg_reward=np.asarray(avg_reward_list, dtype=np.float64),
+        avg_reward_unscaled=np.asarray(avg_reward_unscaled_round, dtype=np.float64),
+        total_loss=np.asarray(total_loss_round, dtype=np.float64),
+        actor_loss=np.asarray(actor_loss_round, dtype=np.float64),
+        value_loss=np.asarray(value_loss_round, dtype=np.float64),
+        entropy=np.asarray(entropy_round, dtype=np.float64),
+    )
+
+    # Reward plot
+    plt.figure()
+    plt.plot(avg_reward_unscaled_round, "*-")
+    plt.grid(True)
+    plt.xlabel("Round")
+    plt.ylabel("Average Reward (unscaled rollout mean)")
+    plt.title("PPO Training (3D Tet RL, Unscaled Reward)")
+    reward_png = os.path.join(run_dir, "reward_curve.png")
+    plt.savefig(reward_png, dpi=150, bbox_inches="tight")
+    # Backward-compatible filename used by earlier analysis notebooks.
+    plt.savefig(os.path.join(run_dir, "avg_reward_trace.png"), dpi=150, bbox_inches="tight")
+    plt.close()
+
+    # Loss plot
+    plt.figure()
+    plt.plot(total_loss_round, label="total loss")
+    plt.plot(actor_loss_round, label="actor loss")
+    plt.plot(value_loss_round, label="value loss")
+    plt.grid(True)
+    plt.xlabel("Round")
+    plt.ylabel("Loss (avg over PPO epochs)")
+    plt.title("PPO Loss Curves (3D Tet RL)")
+    plt.legend()
+    loss_png = os.path.join(run_dir, "loss_curves.png")
+    plt.savefig(loss_png, dpi=150, bbox_inches="tight")
+    # Backward-compatible filename used by earlier analysis notebooks.
+    plt.savefig(os.path.join(run_dir, "loss_trace.png"), dpi=150, bbox_inches="tight")
+    plt.close()
+
+    return metrics_npz_path, reward_png, loss_png
+
+
 def main():
     # -----------------------
     # Hyperparameters
@@ -303,47 +355,33 @@ def main():
                 "run_config": run_config,
             }, ckpt_path)
             print("Saved:", ckpt_path)
+            metrics_npz_path, reward_png, loss_png = save_training_artifacts(
+                run_dir,
+                avg_reward_list,
+                avg_reward_unscaled_round,
+                total_loss_round,
+                actor_loss_round,
+                value_loss_round,
+                entropy_round,
+            )
+            print("Saved metrics:", metrics_npz_path)
+            print("Saved:", reward_png)
+            print("Saved:", loss_png)
 
     # -----------------------
     # Save training metrics + plots
     # -----------------------
-    metrics_npz_path = os.path.join(run_dir, "training_metrics.npz")
-    np.savez(
-        metrics_npz_path,
-        avg_reward=np.asarray(avg_reward_list, dtype=np.float64),
-        avg_reward_unscaled=np.asarray(avg_reward_unscaled_round, dtype=np.float64),
-        total_loss=np.asarray(total_loss_round, dtype=np.float64),
-        actor_loss=np.asarray(actor_loss_round, dtype=np.float64),
-        value_loss=np.asarray(value_loss_round, dtype=np.float64),
-        entropy=np.asarray(entropy_round, dtype=np.float64),
+    metrics_npz_path, reward_png, loss_png = save_training_artifacts(
+        run_dir,
+        avg_reward_list,
+        avg_reward_unscaled_round,
+        total_loss_round,
+        actor_loss_round,
+        value_loss_round,
+        entropy_round,
     )
     print("Saved metrics:", metrics_npz_path)
-
-    # Reward plot
-    plt.figure()
-    plt.plot(avg_reward_unscaled_round, "*-")
-    plt.grid(True)
-    plt.xlabel("Round")
-    plt.ylabel("Average Reward (unscaled rollout mean)")
-    plt.title("PPO Training (3D Tet RL, Unscaled Reward)")
-    reward_png = os.path.join(run_dir, "reward_curve.png")
-    plt.savefig(reward_png, dpi=150, bbox_inches="tight")
-    plt.close()
     print("Saved:", reward_png)
-
-    # Loss plot
-    plt.figure()
-    plt.plot(total_loss_round, label="total loss")
-    plt.plot(actor_loss_round, label="actor loss")
-    plt.plot(value_loss_round, label="value loss")
-    plt.grid(True)
-    plt.xlabel("Round")
-    plt.ylabel("Loss (avg over PPO epochs)")
-    plt.title("PPO Loss Curves (3D Tet RL)")
-    plt.legend()
-    loss_png = os.path.join(run_dir, "loss_curves.png")
-    plt.savefig(loss_png, dpi=150, bbox_inches="tight")
-    plt.close()
     print("Saved:", loss_png)
 
     # Save final
