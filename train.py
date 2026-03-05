@@ -72,24 +72,24 @@ def main():
     # -----------------------
     # Hyperparameters
     # -----------------------
-    num_envs = 16
-    T_rollout = 100            # rollout horizon
-    rounds = 120               # PPO iterations (rounds)
-    gamma = 0.99
-    gae_lambda = 0.95
+    num_envs = 32
+    T_rollout = 50            # rollout horizon
+    rounds = 180               # PPO iterations (rounds)
+    gamma = 0.985
+    gae_lambda = 0.93
 
     K_epochs = 24
     minibatch_size = 128
     eps_clip = 0.15
-    c_v = 1.0
-    c_ent = 0.01
+    c_v = 1.5
+    c_ent = 0.003
     max_grad_norm = 0.5
 
     lr = 2e-4
-    lr_final = 0.1 * lr
+    lr_final = 0.05 * lr
     c_ent_final = c_ent
-    lr_decay_start_frac = 0.5
-    ent_decay_start_frac = 0.6
+    lr_decay_start_frac = 0.25
+    ent_decay_start_frac = 0.5
     use_tqdm_update = False
     profile_timing_update = True
     enable_torch_compile = False
@@ -249,6 +249,7 @@ def main():
         "msg_hidden": msg_hidden,
         "value_hidden": value_hidden,
         "critic_extra_dim": critic_extra_dim,
+        "reward_scale": reward_scale,
         "critic_quality_features": [
             "q_mean",
             "q_min",
