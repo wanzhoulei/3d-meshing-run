@@ -63,6 +63,7 @@ class TetMeshRefineVecEnv:
         patience: int = 50,
         invalid_penalty: float = 0.0,
         reward_scale: float = 1.0,
+        tet_quality_mode: str = "mean_ratio",
         score_mode: str = "softmin",   # "softmin" or "worstk"
         softmin_tau: float = 0.05,
         worstk_k: int = 10,
@@ -80,6 +81,7 @@ class TetMeshRefineVecEnv:
             patience: int, number of steps allowed without improvement before termination 
             invalid_penalty: float, default 0, the penalty applied if invalid step is proposed
             reward_scale: scalar to scale the reward 
+            tet_quality_mode: local per-tet quality metric: "mean_ratio", "simpqual1", or "simpqual2"
             score_mode: str, method to score the current mesh, reward is defined as the difference
             softmin_tau: hyperparameter in the score function, if using softmin score
             worstk_k: hyperparameter in the score function, if using worstk score 
@@ -93,6 +95,7 @@ class TetMeshRefineVecEnv:
         self.patience = int(patience)
         self.invalid_penalty = float(invalid_penalty)
         self.reward_scale = float(reward_scale)
+        self.tet_quality_mode = str(tet_quality_mode)
 
         self.score_mode = str(score_mode)
         self.softmin_tau = float(softmin_tau)
@@ -157,7 +160,7 @@ class TetMeshRefineVecEnv:
         self.topos = []
         for b in range(self.num_envs):
             P, T = self.make_mesh_fn()
-            self.topos.append(TetMeshTopology(P, T))
+            self.topos.append(TetMeshTopology(P, T, tet_quality_mode=self.tet_quality_mode))
             self.steps[b] = 0
             sc = self._score(self.topos[b])
             self.best_score[b] = sc
@@ -244,7 +247,7 @@ class TetMeshRefineVecEnv:
             if done:
                 # auto reset this env
                 P, T = self.make_mesh_fn()
-                self.topos[b] = TetMeshTopology(P, T)
+                self.topos[b] = TetMeshTopology(P, T, tet_quality_mode=self.tet_quality_mode)
                 self.steps[b] = 0
                 self.episode_id[b] += 1
                 sc = self._score(self.topos[b])

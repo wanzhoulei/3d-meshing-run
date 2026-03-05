@@ -107,6 +107,7 @@ def main():
     max_steps_per_episode = 100
     patience = 50
     reward_scale = 10
+    tet_quality_mode = "mean_ratio"  # options: "mean_ratio", "simpqual1", "simpqual2"
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("device:", device)
@@ -164,7 +165,8 @@ def main():
         num_envs=num_envs,
         max_steps_per_episode=max_steps_per_episode,
         patience=patience, 
-        reward_scale = reward_scale
+        reward_scale=reward_scale,
+        tet_quality_mode=tet_quality_mode,
     )
 
     # -----------------------
@@ -239,6 +241,7 @@ def main():
         "lr_final": lr_final,
         "max_steps_per_episode": max_steps_per_episode,
         "patience": patience,
+        "tet_quality_mode": tet_quality_mode,
         "use_tqdm_update": use_tqdm_update,
         "profile_timing_update": profile_timing_update,
         "enable_torch_compile": enable_torch_compile,

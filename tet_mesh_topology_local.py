@@ -4,6 +4,8 @@ from __future__ import annotations
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Iterable, Set
 
+from tet_quality_metrics import compute_tet_quality
+
 
 # ============================================================
 # Geometry / quality
@@ -11,27 +13,6 @@ from typing import Dict, List, Tuple, Optional, Iterable, Set
 
 def tet_signed_volume(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray) -> float:
     return float(np.linalg.det(np.stack([b - a, c - a, d - a], axis=1)))
-
-def tet_mean_ratio_quality(P: np.ndarray, tets: np.ndarray, eps: float = 1e-18) -> np.ndarray:
-    tets = np.asarray(tets, dtype=np.int64)
-    a = P[tets[:, 0]]
-    b = P[tets[:, 1]]
-    c = P[tets[:, 2]]
-    d = P[tets[:, 3]]
-
-    det6 = np.einsum('bi,bi->b', np.cross(b - a, c - a), d - a)
-    V = np.abs(det6) / 6.0
-
-    def sq(x): return np.einsum('bi,bi->b', x, x)
-
-    l2 = (
-        sq(b - a) + sq(c - a) + sq(d - a) +
-        sq(c - b) + sq(d - b) + sq(d - c)
-    )
-
-    q = 12.0 * np.power(3.0 * np.maximum(V, 0.0), 2.0 / 3.0) / np.maximum(l2, eps)
-    return np.clip(q, 0.0, 1.0)
-
 
 # ============================================================
 # Topology helpers
@@ -83,11 +64,18 @@ class TetMeshTopology:
       - flips are GUARANTEED non-degenerate by checking volumes of newly created tets
     """
 
-    def __init__(self, points: np.ndarray, tets: np.ndarray, vol_eps6: float = 1e-12):
+    def __init__(
+        self,
+        points: np.ndarray,
+        tets: np.ndarray,
+        vol_eps6: float = 1e-12,
+        tet_quality_mode: str = "mean_ratio",
+    ):
         self.points = np.asarray(points, dtype=np.float64)
         self.tets = np.asarray(tets, dtype=np.int64)     # ALWAYS active-only, shape (K,4)
         self.vol_eps6 = float(vol_eps6)                  # threshold on |signed_volume_6|
-        self.tet_quality = tet_mean_ratio_quality(self.points, self.tets)
+        self.tet_quality_mode = str(tet_quality_mode)
+        self.tet_quality = compute_tet_quality(self.points, self.tets, mode=self.tet_quality_mode)
 
         # Face registry
         self._face_id: Dict[Tuple[int,int,int], int] = {}
@@ -374,7 +362,7 @@ class TetMeshTopology:
             self.candidate_edge_mask[eid] = self._is_edge_candidate(eid)
 
     def rebuild(self):
-        self.tet_quality = tet_mean_ratio_quality(self.points, self.tets)
+        self.tet_quality = compute_tet_quality(self.points, self.tets, mode=self.tet_quality_mode)
         self._build_candidate_masks()
 
     # ---------------------------
@@ -461,7 +449,8 @@ class TetMeshTopology:
     def _add_tet(self, verts4: Tuple[int,int,int,int]) -> int:
         tid = int(self.tets.shape[0])
         self.tets = np.vstack([self.tets, np.asarray(verts4, dtype=np.int64)[None, :]])
-        self.tet_quality = np.hstack([self.tet_quality, tet_mean_ratio_quality(self.points, self.tets[tid:tid+1])])
+        q_new = compute_tet_quality(self.points, self.tets[tid:tid+1], mode=self.tet_quality_mode)
+        self.tet_quality = np.hstack([self.tet_quality, q_new])
 
         tet = self.tets[tid]
 
