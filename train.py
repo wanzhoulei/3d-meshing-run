@@ -88,7 +88,7 @@ def main():
     lr = 2e-4
     lr_final = 0.05 * lr
     c_ent_final = c_ent
-    lr_decay_start_frac = 0.25
+    lr_decay_start_frac = 0.15
     ent_decay_start_frac = 0.5
     use_tqdm_update = False
     profile_timing_update = True
@@ -114,10 +114,10 @@ def main():
     if device.type == "cuda":
         # A40 profile:
         # run rollout forward on GPU, while keeping feature build on CPU.
-        K_epochs = 12
+        K_epochs = 10
         minibatch_size = 128
         lr = 2e-4
-        lr_final = 0.1 * lr
+        lr_final = 0.05 * lr
         c_ent = 0.004
         c_ent_final = 0.0012
         force_cpu_rollout = False
