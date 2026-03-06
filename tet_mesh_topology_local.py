@@ -442,6 +442,35 @@ class TetMeshTopology:
             return np.zeros((0,), dtype=np.int64)
         return np.asarray(sorted(self._active_eids), dtype=np.int64)
 
+    def _would_create_nonmanifold_faces(
+        self,
+        remove_tids: Set[int],
+        new_tets: List[Tuple[int, int, int, int]],
+    ) -> bool:
+        """
+        Check if replacing `remove_tids` with `new_tets` would create any face with
+        more than two incident tets.
+        """
+        add_counts: Dict[Tuple[int, int, int], int] = {}
+        for tet in new_tets:
+            for fkey in _tet_faces(tet):
+                add_counts[fkey] = add_counts.get(fkey, 0) + 1
+                if add_counts[fkey] > 2:
+                    return True
+
+        for fkey, add_cnt in add_counts.items():
+            existing = 0
+            fid = self._face_id.get(fkey)
+            if fid is not None:
+                t0, t1 = self.face2tet_list[fid]
+                if t0 != -1 and t0 not in remove_tids:
+                    existing += 1
+                if t1 != -1 and t1 not in remove_tids and t1 != t0:
+                    existing += 1
+            if existing + add_cnt > 2:
+                return True
+        return False
+
     # ---------------------------
     # Local tet add/remove (COMPACT)
     # ---------------------------
@@ -553,6 +582,7 @@ class TetMeshTopology:
             return False
         a, b, c = self.faces_list[fid]
         d, e = self.face_opp_list[fid][0], self.face_opp_list[fid][1]
+        new_tets = [(a, b, d, e), (b, c, d, e), (c, a, d, e)]
 
         # FINAL SAFETY CHECK (in case masks are stale)
         eps6 = self.vol_eps6
@@ -561,6 +591,10 @@ class TetMeshTopology:
         if self._abs_vol6(b, c, d, e) <= eps6:
             return False
         if self._abs_vol6(c, a, d, e) <= eps6:
+            return False
+
+        remove_tids = {int(t0), int(t1)}
+        if self._would_create_nonmanifold_faces(remove_tids, new_tets):
             return False
 
         touched = {int(a), int(b), int(c), int(d), int(e)}
@@ -572,9 +606,8 @@ class TetMeshTopology:
         self._remove_tet(int(t1))
         self._remove_tet(int(t0))
 
-        self._add_tet((a, b, d, e))
-        self._add_tet((b, c, d, e))
-        self._add_tet((c, a, d, e))
+        for tet in new_tets:
+            self._add_tet(tet)
 
         dirty_fids_2, dirty_eids_2 = self._dirty_entities_from_vertices(touched)
         dirty_fids.update(dirty_fids_2)
@@ -591,12 +624,17 @@ class TetMeshTopology:
         if link is None:
             return False
         a, b, c = link
+        new_tets = [(a, b, c, u), (a, b, c, v)]
 
         # FINAL SAFETY CHECK
         eps6 = self.vol_eps6
         if self._abs_vol6(a, b, c, u) <= eps6:
             return False
         if self._abs_vol6(a, b, c, v) <= eps6:
+            return False
+
+        remove_tids = {int(tid) for tid in inc}
+        if self._would_create_nonmanifold_faces(remove_tids, new_tets):
             return False
 
         touched = {int(a), int(b), int(c), int(u), int(v)}
@@ -606,8 +644,8 @@ class TetMeshTopology:
         for tid in sorted(inc, reverse=True):
             self._remove_tet(int(tid))
 
-        self._add_tet((a, b, c, u))
-        self._add_tet((a, b, c, v))
+        for tet in new_tets:
+            self._add_tet(tet)
 
         dirty_fids_2, dirty_eids_2 = self._dirty_entities_from_vertices(touched)
         dirty_fids.update(dirty_fids_2)
