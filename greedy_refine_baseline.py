@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -201,7 +202,9 @@ def run_greedy_trace_episode(
         best_delta = -np.inf
 
         for a_env in actions:
-            trial = TetMeshTopology(P, topo.tets.copy(), tet_quality_mode=tet_quality_mode)
+            # Keep action-index mapping identical to current state.
+            # Rebuilding from tets changes internal face/edge IDs, which breaks a_env semantics.
+            trial = copy.deepcopy(topo)
             ok = trial.apply_action(int(a_env))
             if not ok:
                 continue
