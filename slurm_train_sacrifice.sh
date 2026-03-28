@@ -1,52 +1,42 @@
 #!/bin/bash
 # ============================================================
-#  SLURM job: train sacrifice-moves RL agent (1 GPU)
-#  Estimated wall time: ~6–10 hours for 180 rounds on A40
+#  SLURM job: train sacrifice-moves RL agent (1 GPU, V100)
+#  Estimated wall time: ~8–12 hours for 180 rounds on V100
 # ============================================================
 #SBATCH --job-name=train_sacrifice
-#SBATCH --partition=savio4_gpu      # A40 GPUs (40 GB); or savio3_gpu for V100
-#SBATCH --account=YOUR_ACCOUNT      # e.g. fc_yourlab  ← CHANGE THIS
-#SBATCH --qos=savio_normal          # matches partition; use savio_lowprio for preemptable
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4           # workers for CPU-side env stepping
-#SBATCH --gres=gpu:1                # 1 GPU
-#SBATCH --mem=32G
-#SBATCH --time=12:00:00             # 12-hour wall limit
-#SBATCH --output=logs/train_sacrifice_%j.out
-#SBATCH --error=logs/train_sacrifice_%j.err
-#SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=YOUR_EMAIL      # ← CHANGE THIS
+#SBATCH --partition=savio3_gpu
+#SBATCH --account=fc_dgflow
+#SBATCH --qos=v100_gpu3_normal
+#SBATCH --gres=gpu:V100:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=12:00:00
+#SBATCH --output=slurm-%j.out
+#SBATCH --error=slurm-%j.err
 
 # ---- environment ------------------------------------------------
-mkdir -p logs
+set -e
+set -o pipefail
 
-module purge
-module load python/3.10.12          # adjust to available version on Savio
-module load cuda/12.1               # adjust to available CUDA version
+echo "JobID: $SLURM_JOB_ID"
+echo "Node:  $(hostname)"
+echo "Start: $(date)"
 
-# Activate your conda environment
-# Option A (conda):
-source activate 3d-mesh             # ← CHANGE to your env name
-# Option B (venv):
-# source ~/envs/3d-mesh/bin/activate
+cd /global/scratch/users/$USER/3d-meshing-run
 
-cd $SLURM_SUBMIT_DIR
+export MAMBA_ROOT_PREFIX=/global/scratch/users/$USER/micromamba
+export PATH=/global/scratch/users/$USER/bin:$PATH
+MM=/global/scratch/users/$USER/bin/micromamba
 
-echo "=============================="
-echo "Job:    $SLURM_JOB_ID"
-echo "Node:   $SLURMD_NODENAME"
-echo "GPU:    $CUDA_VISIBLE_DEVICES"
-echo "Dir:    $(pwd)"
-echo "Start:  $(date)"
-echo "=============================="
+echo "micromamba: $($MM --version)"
+$MM run -n mesh_torch python -V
 
-# Verify GPU is visible
-python -c "import torch; print('CUDA available:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none')"
+nvidia-smi
 
-# ---- run --------------------------------------------------------
-python train_sacrifice.py
+PYTHONUNBUFFERED=1 $MM run -n mesh_torch python -u -c \
+    "import torch; print('torch', torch.__version__); print('cuda?', torch.cuda.is_available()); print('gpu', torch.cuda.get_device_name(0) if torch.cuda.is_available() else None)"
 
-echo "=============================="
-echo "Done:   $(date)"
-echo "=============================="
+echo "Launching train_sacrifice.py: $(date)"
+PYTHONUNBUFFERED=1 $MM run -n mesh_torch python -u train_sacrifice.py
+echo "Done: $(date)"
+
